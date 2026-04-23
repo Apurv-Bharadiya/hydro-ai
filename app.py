@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import time
-import base64
 from openai import OpenAI
 from tavily import TavilyClient
 from langchain_community.document_loaders import PyPDFDirectoryLoader
@@ -9,14 +8,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-# --- 1. CORE SETUP ---
+# --- 1. SETUP ---
 st.set_page_config(page_title="HYDRO.AI", page_icon="🌊", layout="wide")
 
-# Initialize NVIDIA & Tavily
+# Connect to NVIDIA and Tavily securely
 client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=st.secrets["NVIDIA_API_KEY"])
 tavily = TavilyClient(api_key=st.secrets["TAVILY_API_KEY"])
 
-# Professional UI CSS
 st.markdown("""
 <style>
     footer {visibility: hidden;}
@@ -28,14 +26,13 @@ st.markdown("""
         font-weight: 900;
         font-size: 3.5rem;
     }
-    .stChatInputContainer { border-radius: 25px !important; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🌊 HYDRO.AI")
-st.caption("Next-gen intelligence for Water Resources Engineering. | LDCE Mentor Mode")
+st.caption("Next-gen intelligence for Water Resources Engineering.")
 
-# --- 2. THE KNOWLEDGE VAULT (RAG) ---
+# --- 2. LOCAL VAULT (PDFs) ---
 FAISS_INDEX_PATH = "wre_faiss_index"
 DOCS_DIR = "wre_docs"
 
@@ -43,17 +40,15 @@ DOCS_DIR = "wre_docs"
 def load_knowledge_base():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     if os.path.exists(FAISS_INDEX_PATH):
-        return FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True), "Memory Active"
+        return FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True), "Vault Active"
     
     if not os.path.exists(DOCS_DIR): os.makedirs(DOCS_DIR)
     loader = PyPDFDirectoryLoader(DOCS_DIR)
     docs = loader.load()
-    if not docs: return None, "Awaiting Data..."
+    if not docs: return None, "Awaiting PDFs..."
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=250)
     chunks = text_splitter.split_documents(docs)
-    
-    # Bug Fix: Stamp filename on every chunk
     for chunk in chunks:
         chunk.page_content = f"SOURCE: {os.path.basename(chunk.metadata.get('source',''))}\n{chunk.page_content}"
         
@@ -61,89 +56,76 @@ def load_knowledge_base():
     vector_db.save_local(FAISS_INDEX_PATH)
     return vector_db, f"Indexed {len(docs)} pages."
 
-# --- 3. THE MULTIMODAL MENTOR BRAIN ---
-def process_query(query, image_file=None):
-    context = ""
-    search_results = ""
-    
-    # A. Search the Vault (PDFs)
-    if vector_db:
-        docs = vector_db.similarity_search(query, k=10)
-        context = "\n\n".join([d.page_content for d in docs])
-    
-    # B. Search the Internet (Tavily)
-    with st.spinner("Searching the internet for the latest data..."):
-        web_data = tavily.search(query=query, search_depth="advanced")
-        search_results = "\n".join([f"{r['title']}: {r['content']}" for r in web_data['results']])
-
-    # C. Prepare the Vision Prompt (if image uploaded)
-    messages = [
-        {"role": "system", "content": (
-            "You are a mentor of the WRE Dept at L.D. College of Engineering. "
-            "Use LaTeX for math ($...$). Use Markdown tables for data. "
-            "Synthesize information from the Vault and the Internet. "
-            f"VAULT DATA:\n{context}\n\nINTERNET DATA:\n{search_results}"
-        )},
-    ]
-    
-    if image_file:
-        base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": query},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-            ]
-        })
-    else:
-        messages.append({"role": "user", "content": query})
-
-    # D. Call NVIDIA Gemma 4
-    response = client.chat.completions.create(
-        model="google/gemma-4-31b-it",
-        messages=messages,
-        temperature=0.1,
-        stream=True
-    )
-    return response
-
-# --- 4. SIDEBAR & UI ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.markdown("<h1 style='text-align: center;'>🌊</h1>", unsafe_allow_html=True)
     vector_db, status = load_knowledge_base()
     st.success(status)
+    st.info("Connected to NVIDIA Gemma 4 & Tavily Web Search")
     
     st.divider()
-    st.subheader("🧠 Expand Brain")
-    uploaded_pdf = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
-    if uploaded_pdf and st.button("Update Vault"):
-        # (Same logic as before to rebuild index)
-        st.cache_resource.clear()
-        st.rerun()
-
     if st.button("🗑️ Reset Chat"):
         st.session_state.messages = []
         st.rerun()
 
-# --- 5. CHAT INTERFACE ---
+# --- 4. AI BRAIN & CHAT UI ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Welcome! NVIDIA Gemma 4 is online with Internet Search and PDF Knowledge. How can I help your research today?"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Welcome! I am connected to your PDF Vault and the Live Internet. Ask me anything."}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Vision Feature: Image uploader in the main chat
-img_upload = st.file_uploader("📸 Analysis: Upload an image (Hydrograph, Map, etc.)", type=["jpg", "png", "jpeg"])
-
 user_input = st.chat_input("Ask HYDRO.AI...")
 
+def stream_nvidia_response(system_prompt, user_query):
+    # Ask NVIDIA Gemma 4 to stream the answer back smoothly
+    response = client.chat.completions.create(
+        model="google/gemma-4-31b-it",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query}
+        ],
+        temperature=0.1,
+        stream=True
+    )
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
+
 if user_input:
+    # 1. Show user message
     with st.chat_message("user"):
         st.markdown(user_input)
     st.session_state.messages.append({"role": "user", "content": user_input})
 
+    # 2. Gather Data (PDFs + Internet)
     with st.chat_message("assistant"):
-        response_stream = process_query(user_input, img_upload)
-        full_response = st.write_stream(response_stream)
+        vault_data = ""
+        web_data = ""
+        
+        with st.spinner("Searching Vault & Web..."):
+            # Search Vault
+            if vector_db:
+                docs = vector_db.similarity_search(user_input, k=5)
+                vault_data = "\n\n".join([d.page_content for d in docs])
+            
+            # Search Web
+            try:
+                search_results = tavily.search(query=user_input)
+                web_data = "\n".join([f"- {r['content']}" for r in search_results['results']])
+            except:
+                web_data = "Web search currently unavailable."
+
+        # 3. Create the Master Prompt
+        system_prompt = (
+            "You are a mentor for Water Resources Engineering. "
+            "Answer the user using the provided VAULT DATA and WEB DATA below. "
+            "Use LaTeX for math. Be professional and accurate.\n\n"
+            f"=== VAULT DATA ===\n{vault_data}\n\n"
+            f"=== WEB DATA ===\n{web_data}"
+        )
+
+        # 4. Stream the answer from NVIDIA
+        full_response = st.write_stream(stream_nvidia_response(system_prompt, user_input))
         st.session_state.messages.append({"role": "assistant", "content": full_response})
