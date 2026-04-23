@@ -90,9 +90,10 @@ def stream_nvidia_response(system_prompt, user_query):
         stream=True
     )
     for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
-
+        # BUG FIX: Safely check if 'choices' exists before reading it
+        if chunk.choices and len(chunk.choices) > 0:
+            if chunk.choices[0].delta.content is not None:
+                yield chunk.choices[0].delta.content
 if user_input:
     # 1. Show user message
     with st.chat_message("user"):
