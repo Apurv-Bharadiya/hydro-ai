@@ -1,12 +1,8 @@
 streamlit
-langchain
-langchain-groq
+openai
+tavily-python
 langchain-community
-langchain-classic
 langchain-text-splitters
 sentence-transformers
 pypdf
 faiss-cpu
-tavily-python
-langchain-community
-openai
