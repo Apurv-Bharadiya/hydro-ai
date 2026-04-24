@@ -79,21 +79,26 @@ for msg in st.session_state.messages:
 user_input = st.chat_input("Ask HYDRO.AI...")
 
 def stream_nvidia_response(system_prompt, user_query):
-    # Ask NVIDIA Gemma 4 to stream the answer back smoothly
-    response = client.chat.completions.create(
-        model="google/gemma-4-31b-it",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_query}
-        ],
-        temperature=0.1,
-        stream=True
-    )
-    for chunk in response:
-        # BUG FIX: Safely check if 'choices' exists before reading it
-        if chunk.choices and len(chunk.choices) > 0:
-            if chunk.choices[0].delta.content is not None:
-                yield chunk.choices[0].delta.content
+    try:
+        # Ask NVIDIA Gemma 4 to stream the answer back smoothly
+        response = client.chat.completions.create(
+            model="google/gemma-4-31b-it",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query}
+            ],
+            temperature=0.1,
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices and len(chunk.choices) > 0:
+                if chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
+                    
+    except Exception as e:
+        # If NVIDIA's server drops the connection mid-sentence, catch it gracefully!
+        yield "\n\n*[Network connection interrupted by the NVIDIA server. The response above may be incomplete.]*"
+
 if user_input:
     # 1. Show user message
     with st.chat_message("user"):
